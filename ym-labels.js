@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Metrika Chart Labels
 // @namespace    https://t.me/seregaseo
-// @version      4.4
-// @description  Подписи значений и полные метки оси X на графиках Яндекс Метрики
+// @version      4.7
+// @description  Подписи значений, метки оси X, АППГ под графиком на графиках Яндекс Метрики
 // @author       @sc00d (https://t.me/seregaseo)
 // @match        https://metrika.yandex.ru/*
 // @match        https://metrika.yandex.com/*
@@ -16,6 +16,8 @@
   let labelsEnabled = true;
   let roundEnabled  = false;
   let xAxisEnabled  = true;
+  let appgEnabled   = true;
+  let panelCollapsed = false;
 
   function fmt(n) {
     if (roundEnabled) {
@@ -48,12 +50,12 @@
     const { start, group } = info;
     const labels = [];
     const d = new Date(start);
-    const fmtMonth = dt => dt.toLocaleDateString('ru-RU', { month: 'short', year: '2-digit' });
+    const fmtMonth = dt => dt.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
     const fmtDay   = dt => `${dt.getDate()} ${dt.toLocaleDateString('ru-RU', { month: 'short' })}`;
     for (let i = 0; i < count; i++) {
-      if (group === 'month') { labels.push(fmtMonth(new Date(d))); d.setMonth(d.getMonth() + 1); }
-      else if (group === 'week') { labels.push(fmtDay(new Date(d))); d.setDate(d.getDate() + 7); }
-      else { labels.push(fmtDay(new Date(d))); d.setDate(d.getDate() + 1); }
+      if (group === 'month')      { labels.push(fmtMonth(new Date(d))); d.setMonth(d.getMonth() + 1); }
+      else if (group === 'week')  { labels.push(fmtDay(new Date(d))); d.setDate(d.getDate() + 7); }
+      else                        { labels.push(fmtDay(new Date(d))); d.setDate(d.getDate() + 1); }
     }
     return labels;
   }
@@ -85,9 +87,103 @@
     candidates.forEach(el => el.style.display = 'none');
   }
 
+  // ── АППГ-блок ─────────────────────────────────────────────────────────────
+
+  function removeAppgBlocks() {
+    document.querySelectorAll('.custom-appg-block').forEach(e => e.remove());
+  }
+
+  function drawAppgBlock(seriesData, uniqueGraphs) {
+    removeAppgBlocks();
+    const info = getPeriodInfo();
+    if (!info || info.group !== 'month') return;
+    const pts0 = seriesData[0]?.data;
+    if (!pts0 || pts0.length < 13) return;
+
+    const rows = [];
+    uniqueGraphs.forEach((graph, si) => {
+      const pts = seriesData[si]?.data;
+      if (!pts || pts.length < 13) return;
+      const last  = pts[pts.length - 1];
+      const appg  = pts[pts.length - 13];
+      const name  = seriesData[si]?.name;
+      const color = graph.getAttribute('stroke') || '#5B8AF0';
+      const seriesName = Array.isArray(name) ? name.join(', ') : (name || `Серия ${si + 1}`);
+      const diff  = last.y - appg.y;
+      const pct   = appg.y !== 0 ? (diff / appg.y) * 100 : 0;
+      const sign  = diff >= 0 ? '+' : '';
+      const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '—';
+      const diffColor = diff > 0 ? '#27ae60' : diff < 0 ? '#e74c3c' : '#888';
+      const labels    = buildLabels(pts.length);
+      const lastLabel = labels ? labels[pts.length - 1]  : 'последний месяц';
+      const appgLabel = labels ? labels[pts.length - 13] : 'АППГ';
+      rows.push({ seriesName, color, lastVal: fmt(last.y), appgVal: fmt(appg.y),
+        lastLabel, appgLabel, arrow, diffColor,
+        diffStr: `${sign}${fmt(Math.abs(diff))}`,
+        pctStr:  `${sign}${pct.toFixed(1).replace('.', ',')}%` });
+    });
+    if (!rows.length) return;
+
+    const block = document.createElement('div');
+    block.className = 'custom-appg-block';
+    block.style.cssText = `
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      z-index: 99998; background: #fff; border: 1px solid #dde0ea; border-radius: 12px;
+      padding: 14px 36px 14px 20px; font-family: YS Text, Arial, sans-serif;
+      font-size: 15px; color: #222; display: flex; align-items: flex-start;
+      gap: 28px; box-shadow: 0 4px 24px rgba(0,0,0,0.13); max-width: 90vw;
+    `;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `position:absolute;top:6px;right:10px;background:none;border:none;
+      font-size:20px;color:#aaa;cursor:pointer;line-height:1;padding:0;`;
+    closeBtn.addEventListener('click', () => block.remove());
+    block.appendChild(closeBtn);
+
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = `font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.05em;
+      font-weight:600;writing-mode:vertical-rl;text-orientation:mixed;align-self:center;margin-right:4px;`;
+    titleEl.textContent = 'АППГ';
+    block.appendChild(titleEl);
+
+    const divider = document.createElement('div');
+    divider.style.cssText = 'width:1px;background:#eee;align-self:stretch;';
+    block.appendChild(divider);
+
+    rows.forEach((row, ri) => {
+      if (ri > 0) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'width:1px;background:#eee;align-self:stretch;';
+        block.appendChild(sep);
+      }
+      const cell = document.createElement('div');
+      cell.style.cssText = 'display:flex;flex-direction:column;gap:6px;min-width:180px;';
+      cell.innerHTML = `
+        <div style="font-weight:700;color:${row.color};font-size:14px;">${row.seriesName}</div>
+        <div>
+          <div style="color:#aaa;font-size:12px;">${row.lastLabel}</div>
+          <div style="font-weight:800;font-size:22px;color:#222;line-height:1.2;">${row.lastVal}</div>
+        </div>
+        <div>
+          <div style="color:#bbb;font-size:12px;">${row.appgLabel}: <b style="color:#888;">${row.appgVal}</b></div>
+          <div style="font-size:17px;font-weight:700;color:${row.diffColor};">
+            ${row.arrow} ${row.diffStr} <span style="font-size:15px;">(${row.pctStr})</span>
+          </div>
+        </div>
+      `;
+      block.appendChild(cell);
+    });
+
+    document.body.appendChild(block);
+  }
+
+  // ── Очистка ───────────────────────────────────────────────────────────────
+
   function removeLabels() {
-    document.querySelectorAll('.custom-val-label, .custom-val-dot, .custom-xaxis-label, .custom-xaxis-line').forEach(e => e.remove());
+    document.querySelectorAll('.custom-val-label,.custom-val-dot,.custom-xaxis-label,.custom-xaxis-line').forEach(e => e.remove());
     restoreNativeXLabels();
+    removeAppgBlocks();
   }
 
   function drawLabels() {
@@ -147,8 +243,6 @@
       }
     }
 
-    if (!labelsEnabled) return;
-
     const chartEl = svg.closest('[class*="chart_type"]');
     if (!chartEl) return;
     const fiberKey = Object.keys(chartEl).find(k => k.startsWith('__reactFiber'));
@@ -163,9 +257,10 @@
     }
     if (!seriesData) return;
 
-    const LABEL_H   = 20;
-    const ABOVE_OFF = 22;
-    const BELOW_OFF = 22;
+    if (appgEnabled) drawAppgBlock(seriesData, uniqueGraphs);
+    if (!labelsEnabled) return;
+
+    const LABEL_H = 20, ABOVE_OFF = 22, BELOW_OFF = 22;
 
     uniqueGraphs.forEach((graph, si) => {
       const points = seriesData[si]?.data;
@@ -176,38 +271,26 @@
       for (const m of graph.getAttribute('d').matchAll(/[ML]\s*([\d.]+)[,\s]([\d.]+)/g)) {
         pathCoords.push({ x: parseFloat(m[1]), y: parseFloat(m[2]) });
       }
-
       const selectedIdxs = pathCoords.map((_, i) => i)
         .filter(i => i % step === 0 || i === pathCoords.length - 1);
-
-      // Чётная серия — подпись выше, нечётная — ниже
       const placeBelow = si % 2 === 1;
-
       const labels = selectedIdxs.map(i => {
-        const cx = pathCoords[i].x + plotX;
-        const cy = pathCoords[i].y + plotY;
-        const ly = placeBelow ? cy + BELOW_OFF : cy - ABOVE_OFF;
-        return { cx, cy, ly, placeBelow, label: fmt(yVals[i] ?? 0), lineColor };
+        const cx = pathCoords[i].x + plotX, cy = pathCoords[i].y + plotY;
+        return { cx, cy, ly: placeBelow ? cy + BELOW_OFF : cy - ABOVE_OFF,
+          placeBelow, label: fmt(yVals[i] ?? 0), lineColor };
       });
 
-      // O(n) антиколлизия внутри серии
       if (!placeBelow) {
         labels.sort((a, b) => a.cy - b.cy);
         for (let k = 1; k < labels.length; k++) {
-          const prev = labels[k - 1], cur = labels[k];
-          if (Math.abs(cur.cx - prev.cx) < 60) {
-            const gap = prev.ly - (cur.ly - LABEL_H);
-            if (gap > 0) cur.ly -= gap + 4;
-          }
+          const prev = labels[k-1], cur = labels[k];
+          if (Math.abs(cur.cx - prev.cx) < 60) { const gap = prev.ly - (cur.ly - LABEL_H); if (gap > 0) cur.ly -= gap + 4; }
         }
       } else {
         labels.sort((a, b) => b.cy - a.cy);
         for (let k = 1; k < labels.length; k++) {
-          const prev = labels[k - 1], cur = labels[k];
-          if (Math.abs(cur.cx - prev.cx) < 60) {
-            const gap = (cur.ly - LABEL_H) - prev.ly;
-            if (gap < 0) cur.ly -= gap - 4;
-          }
+          const prev = labels[k-1], cur = labels[k];
+          if (Math.abs(cur.cx - prev.cx) < 60) { const gap = (cur.ly - LABEL_H) - prev.ly; if (gap < 0) cur.ly -= gap - 4; }
         }
       }
 
@@ -223,55 +306,78 @@
           line.setAttribute('class', 'custom-val-dot');
           svg.appendChild(line);
         }
-        const oc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        oc.setAttribute('cx', cx); oc.setAttribute('cy', cy); oc.setAttribute('r', 7);
-        oc.setAttribute('fill', 'white'); oc.setAttribute('stroke', lineColor);
-        oc.setAttribute('stroke-width', 2); oc.setAttribute('class', 'custom-val-dot');
-        svg.appendChild(oc);
-        const ic = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        ic.setAttribute('cx', cx); ic.setAttribute('cy', cy); ic.setAttribute('r', 3.5);
-        ic.setAttribute('fill', lineColor); ic.setAttribute('class', 'custom-val-dot');
-        svg.appendChild(ic);
-
+        [[7,'white',lineColor,2],[3.5,lineColor,lineColor,0]].forEach(([r,fill,stroke,sw]) => {
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+          c.setAttribute('fill', fill); if (sw) { c.setAttribute('stroke', stroke); c.setAttribute('stroke-width', sw); }
+          c.setAttribute('class', 'custom-val-dot'); svg.appendChild(c);
+        });
         const tmp = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         tmp.setAttribute('font-size', '11'); tmp.setAttribute('font-family', 'YS Text, Arial, sans-serif');
         tmp.textContent = label; svg.appendChild(tmp);
         const tw = tmp.getComputedTextLength(); svg.removeChild(tmp);
-
-        const pad = 5, bw = tw + pad * 2, bh = 18;
-        const rectY = placeBelow ? ly : ly - bh + 2;
+        const pad = 5, bw = tw + pad * 2, bh = 18, rectY = placeBelow ? ly : ly - bh + 2;
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', cx - bw / 2); rect.setAttribute('y', rectY);
+        rect.setAttribute('x', cx - bw/2); rect.setAttribute('y', rectY);
         rect.setAttribute('width', bw); rect.setAttribute('height', bh);
-        rect.setAttribute('rx', 4); rect.setAttribute('ry', 4);
-        rect.setAttribute('fill', lineColor); rect.setAttribute('opacity', '0.9');
-        rect.setAttribute('class', 'custom-val-label');
+        rect.setAttribute('rx', 4); rect.setAttribute('fill', lineColor);
+        rect.setAttribute('opacity', '0.9'); rect.setAttribute('class', 'custom-val-label');
         svg.appendChild(rect);
-
-        const textY = placeBelow ? ly + bh - 5 : ly - 4;
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        text.setAttribute('x', cx); text.setAttribute('y', textY);
+        text.setAttribute('x', cx); text.setAttribute('y', placeBelow ? ly + bh - 5 : ly - 4);
         text.setAttribute('text-anchor', 'middle'); text.setAttribute('font-size', '11');
         text.setAttribute('font-weight', '600'); text.setAttribute('fill', 'white');
         text.setAttribute('font-family', 'YS Text, Arial, sans-serif');
-        text.setAttribute('class', 'custom-val-label');
-        text.textContent = label;
+        text.setAttribute('class', 'custom-val-label'); text.textContent = label;
         svg.appendChild(text);
       });
     });
   }
 
+  // ── UI панель с кнопкой свернуть ─────────────────────────────────────────
+
   function createToggle() {
     if (document.getElementById('metrika-labels-toggle-wrap')) return;
+
     const wrap = document.createElement('div');
     wrap.id = 'metrika-labels-toggle-wrap';
     wrap.style.cssText = `
       position: fixed; bottom: 20px; right: 20px; z-index: 99999;
       background: #fff; border: 1px solid #d9d9d9; border-radius: 8px;
-      padding: 8px 14px; display: flex; flex-direction: column; gap: 6px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.13);
       font-family: YS Text, Arial, sans-serif; font-size: 13px; color: #333;
+      overflow: hidden;
     `;
+
+    // ── Шапка панели ─────────────────────────────────────────────────────
+    const header = document.createElement('div');
+    header.style.cssText = `
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 10px 7px 14px; cursor: pointer;
+      border-bottom: 1px solid #eee; gap: 10px;
+      user-select: none;
+    `;
+
+    const headerTitle = document.createElement('span');
+    headerTitle.textContent = '📊 Метрика';
+    headerTitle.style.cssText = 'font-weight:600;font-size:12px;color:#555;';
+
+    const collapseBtn = document.createElement('button');
+    collapseBtn.style.cssText = `
+      background: none; border: none; cursor: pointer;
+      font-size: 16px; color: #aaa; line-height: 1; padding: 0;
+      transition: transform 0.2s;
+    `;
+    collapseBtn.textContent = '▲';
+    collapseBtn.title = 'Свернуть';
+
+    header.appendChild(headerTitle);
+    header.appendChild(collapseBtn);
+
+    // ── Тело панели ──────────────────────────────────────────────────────
+    const body = document.createElement('div');
+    body.style.cssText = 'padding: 8px 14px 8px 14px; display: flex; flex-direction: column; gap: 6px;';
+
     function makeRow(id, labelText, checked, onChange) {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;';
@@ -284,15 +390,45 @@
       row.appendChild(cb); row.appendChild(lbl);
       return row;
     }
-    wrap.appendChild(makeRow('metrika-labels-cb', 'Подписать значения', labelsEnabled, val => { labelsEnabled = val; drawLabels(); }));
-    wrap.appendChild(makeRow('metrika-round-cb',  'Округлять значения', roundEnabled,  val => { roundEnabled  = val; drawLabels(); }));
-    wrap.appendChild(makeRow('metrika-xaxis-cb',  'Все метки оси X',    xAxisEnabled,  val => { xAxisEnabled  = val; drawLabels(); }));
+
+    body.appendChild(makeRow('metrika-labels-cb', 'Подписать значения',  labelsEnabled, val => { labelsEnabled = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-round-cb',  'Округлять значения',  roundEnabled,  val => { roundEnabled  = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-xaxis-cb',  'Все метки оси X',     xAxisEnabled,  val => { xAxisEnabled  = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-appg-cb',   'АППГ под графиком',   appgEnabled,   val => { appgEnabled   = val; drawLabels(); }));
+
     const authorDiv = document.createElement('div');
     authorDiv.style.cssText = 'border-top:1px solid #eee;margin-top:2px;padding-top:6px;font-size:11px;color:#999;display:flex;align-items:center;gap:4px;';
     authorDiv.innerHTML = 'by <a href="https://t.me/seregaseo" target="_blank" rel="noopener noreferrer" style="color:#5B8AF0;text-decoration:none;font-weight:600;">@sc00d</a>';
-    wrap.appendChild(authorDiv);
+    body.appendChild(authorDiv);
+
+    // ── Логика сворачивания ───────────────────────────────────────────────
+    function applyCollapsed() {
+      if (panelCollapsed) {
+        body.style.display = 'none';
+        collapseBtn.textContent = '▼';
+        collapseBtn.title = 'Развернуть';
+        header.style.borderBottom = 'none';
+      } else {
+        body.style.display = 'flex';
+        collapseBtn.textContent = '▲';
+        collapseBtn.title = 'Свернуть';
+        header.style.borderBottom = '1px solid #eee';
+      }
+    }
+
+    header.addEventListener('click', () => {
+      panelCollapsed = !panelCollapsed;
+      applyCollapsed();
+    });
+
+    applyCollapsed();
+
+    wrap.appendChild(header);
+    wrap.appendChild(body);
     document.body.appendChild(wrap);
   }
+
+  // ── Запуск ────────────────────────────────────────────────────────────────
 
   function waitForChart() {
     let tries = 0;
