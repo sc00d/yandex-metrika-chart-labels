@@ -150,7 +150,7 @@
             text.setAttribute('x', cx);
             text.setAttribute('y', axisY + 15);
             text.setAttribute('text-anchor', 'middle');
-            text.setAttribute('font-size', '10');
+            text.setAttribute('font-size', '12');
             text.setAttribute('fill', '#666');
             text.setAttribute('font-family', 'YS Text, Arial, sans-serif');
             text.setAttribute('class', 'custom-xaxis-label');
