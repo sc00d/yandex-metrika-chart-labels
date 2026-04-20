@@ -8,15 +8,15 @@
 
 **До:**
 
-<img width="564" height="225" alt="График без подписей" src="https://github.com/user-attachments/assets/197d51be-2f5c-4948-b3ea-dc48ade2d7c6" />
+<img width="900"  alt="График без подписей" src="https://github.com/user-attachments/assets/197d51be-2f5c-4948-b3ea-dc48ade2d7c6" />
 
 **После:**
 
-<img width="563" height="195" alt="График с подписями" src="https://github.com/user-attachments/assets/3ec2ec50-ed60-4994-a8dd-ef072bfb6663" />
+<img width="900"  alt="График с подписями" src="https://github.com/user-attachments/assets/3ec2ec50-ed60-4994-a8dd-ef072bfb6663" />
 
 Внизу страницы появляется панель настроек:
 
-<img width="128" height="86" alt="Панель настроек" src="https://github.com/user-attachments/assets/d0e8f059-a637-4d88-ad69-39241769d119" />
+<img width="200"  alt="Панель настроек" src="https://github.com/user-attachments/assets/d0e8f059-a637-4d88-ad69-39241769d119" />
 
 ---
 
