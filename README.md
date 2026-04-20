@@ -28,7 +28,7 @@
 
    <img width="149" height="63" alt="Создать скрипт" src="https://github.com/user-attachments/assets/1ffcd079-3000-4519-9468-76c5d5d290c0" />
 
-3. Удалите весь дефолтный код и вставьте содержимое файла [`metrika-labels.user.js`](./metrika-labels.user.js)
+3. Удалите весь дефолтный код и вставьте содержимое файла [`ym-labels`](./ym-labels.js)
 
 4. Нажмите **Ctrl+S** или кнопку «Сохранить»
 
