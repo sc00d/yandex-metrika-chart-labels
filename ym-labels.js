@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Metrika Chart Labels
 // @namespace    https://t.me/seregaseo
-// @version      4.7
+// @version      4.8
 // @description  Подписи значений, метки оси X, АППГ под графиком на графиках Яндекс Метрики
 // @author       @sc00d (https://t.me/seregaseo)
 // @match        https://metrika.yandex.ru/*
@@ -13,11 +13,13 @@
 (function () {
   'use strict';
 
-  let labelsEnabled = true;
-  let roundEnabled  = false;
-  let xAxisEnabled  = true;
-  let appgEnabled   = true;
+  let labelsEnabled  = true;
+  let roundEnabled   = false;
+  let xAxisEnabled   = true;
+  let appgEnabled    = true;
   let panelCollapsed = false;
+
+  // ── Форматирование ───────────────────────────────────────────────────────
 
   function fmt(n) {
     if (roundEnabled) {
@@ -27,6 +29,8 @@
     }
     return Number(n).toLocaleString('ru-RU');
   }
+
+  // ── Период из URL ────────────────────────────────────────────────────────
 
   function getPeriodInfo() {
     const params = new URLSearchParams(location.search);
@@ -53,9 +57,9 @@
     const fmtMonth = dt => dt.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
     const fmtDay   = dt => `${dt.getDate()} ${dt.toLocaleDateString('ru-RU', { month: 'short' })}`;
     for (let i = 0; i < count; i++) {
-      if (group === 'month')      { labels.push(fmtMonth(new Date(d))); d.setMonth(d.getMonth() + 1); }
-      else if (group === 'week')  { labels.push(fmtDay(new Date(d))); d.setDate(d.getDate() + 7); }
-      else                        { labels.push(fmtDay(new Date(d))); d.setDate(d.getDate() + 1); }
+      if (group === 'month')     { labels.push(fmtMonth(new Date(d))); d.setMonth(d.getMonth() + 1); }
+      else if (group === 'week') { labels.push(fmtDay(new Date(d)));   d.setDate(d.getDate() + 7); }
+      else                       { labels.push(fmtDay(new Date(d)));   d.setDate(d.getDate() + 1); }
     }
     return labels;
   }
@@ -69,6 +73,8 @@
     if (count <= 120) return 7;
     return 10;
   }
+
+  // ── Родные метки X ────────────────────────────────────────────────────────
 
   function restoreNativeXLabels() {
     document.querySelectorAll('.highcharts-axis-labels.highcharts-xaxis-labels').forEach(e => e.style.display = '');
@@ -85,6 +91,46 @@
     });
     if (!candidates.length) candidates.push(...document.querySelectorAll('.highcharts-axis-labels.highcharts-xaxis-labels'));
     candidates.forEach(el => el.style.display = 'none');
+  }
+
+  // ── Позиция подписи с учётом границ ──────────────────────────────────────
+  // Возвращает { ly, placeBelow } с зажатыми значениями
+  // plotTop  — верхняя граница области (plotY)
+  // plotBot  — нижняя граница области (plotY + plotH), НЕ включая ось X
+  // LABEL_H  — высота бейджа
+  // ABOVE/BELOW_OFF — желаемое смещение от точки
+
+  const LABEL_H   = 18;
+  const ABOVE_OFF = 22;
+  const BELOW_OFF = 22;
+  const X_AXIS_CLEARANCE = 26; // px ниже plotBot — зона оси X, туда не лезем
+
+  function calcLabelPos(cy, placeBelow, plotTop, plotBot) {
+    const safeBot = plotBot - X_AXIS_CLEARANCE; // нижняя безопасная граница
+    let ly;
+
+    if (placeBelow) {
+      ly = cy + BELOW_OFF;
+      // Если подпись выходит за нижнюю безопасную зону — переносим выше точки
+      if (ly + LABEL_H > safeBot) {
+        placeBelow = false;
+        ly = cy - ABOVE_OFF;
+      }
+    } else {
+      ly = cy - ABOVE_OFF;
+    }
+
+    // Зажимаем сверху: подпись не выше верхнего края области
+    if (!placeBelow && ly - LABEL_H < plotTop + 4) {
+      ly = plotTop + 4 + LABEL_H;
+    }
+
+    // Зажимаем снизу (на случай если даже выше не вмещается)
+    if (placeBelow && ly + LABEL_H > safeBot) {
+      ly = safeBot - LABEL_H;
+    }
+
+    return { ly, placeBelow };
   }
 
   // ── АППГ-блок ─────────────────────────────────────────────────────────────
@@ -127,13 +173,12 @@
     const block = document.createElement('div');
     block.className = 'custom-appg-block';
     block.style.cssText = `
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-      z-index: 99998; background: #fff; border: 1px solid #dde0ea; border-radius: 12px;
-      padding: 14px 36px 14px 20px; font-family: YS Text, Arial, sans-serif;
-      font-size: 15px; color: #222; display: flex; align-items: flex-start;
-      gap: 28px; box-shadow: 0 4px 24px rgba(0,0,0,0.13); max-width: 90vw;
+      position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+      z-index:99998; background:#fff; border:1px solid #dde0ea; border-radius:12px;
+      padding:14px 36px 14px 20px; font-family:YS Text,Arial,sans-serif;
+      font-size:15px; color:#222; display:flex; align-items:flex-start;
+      gap:28px; box-shadow:0 4px 24px rgba(0,0,0,.13); max-width:90vw;
     `;
-
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.style.cssText = `position:absolute;top:6px;right:10px;background:none;border:none;
@@ -142,14 +187,14 @@
     block.appendChild(closeBtn);
 
     const titleEl = document.createElement('div');
-    titleEl.style.cssText = `font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.05em;
+    titleEl.style.cssText = `font-size:12px;color:#999;text-transform:uppercase;letter-spacing:.05em;
       font-weight:600;writing-mode:vertical-rl;text-orientation:mixed;align-self:center;margin-right:4px;`;
     titleEl.textContent = 'АППГ';
     block.appendChild(titleEl);
 
-    const divider = document.createElement('div');
-    divider.style.cssText = 'width:1px;background:#eee;align-self:stretch;';
-    block.appendChild(divider);
+    const divider0 = document.createElement('div');
+    divider0.style.cssText = 'width:1px;background:#eee;align-self:stretch;';
+    block.appendChild(divider0);
 
     rows.forEach((row, ri) => {
       if (ri > 0) {
@@ -170,11 +215,9 @@
           <div style="font-size:17px;font-weight:700;color:${row.diffColor};">
             ${row.arrow} ${row.diffStr} <span style="font-size:15px;">(${row.pctStr})</span>
           </div>
-        </div>
-      `;
+        </div>`;
       block.appendChild(cell);
     });
-
     document.body.appendChild(block);
   }
 
@@ -191,12 +234,15 @@
     document.querySelectorAll('.highcharts-root').forEach(svg => drawForChart(svg));
   }
 
+  // ── Основная отрисовка ───────────────────────────────────────────────────
+
   function drawForChart(svg) {
     const plotBg = svg.querySelector('.highcharts-plot-background');
     if (!plotBg) return;
-    const plotX = parseFloat(plotBg.getAttribute('x'));
-    const plotY = parseFloat(plotBg.getAttribute('y'));
-    const plotH = parseFloat(plotBg.getAttribute('height'));
+    const plotX   = parseFloat(plotBg.getAttribute('x'));
+    const plotY   = parseFloat(plotBg.getAttribute('y'));
+    const plotH   = parseFloat(plotBg.getAttribute('height'));
+    const plotBot = plotY + plotH; // нижняя граница области
 
     const uniqueGraphs = [];
     const seenPaths = new Set();
@@ -218,11 +264,12 @@
     const group = info?.group || 'day';
     const step  = calcStep(pointCount, group);
 
+    // ── Ось X ─────────────────────────────────────────────────────────────
     if (xAxisEnabled && pointCount > 0) {
       const periodLabels = buildLabels(pointCount);
       if (periodLabels && periodLabels.length === pointCount) {
         hideNativeXLabelsForSvg(svg);
-        const axisY = plotY + plotH + 1;
+        const axisY = plotBot + 1;
         xCoords.forEach((cx, i) => {
           if (i % step !== 0 && i !== pointCount - 1) return;
           const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -243,6 +290,7 @@
       }
     }
 
+    // ── React fiber → данные ──────────────────────────────────────────────
     const chartEl = svg.closest('[class*="chart_type"]');
     if (!chartEl) return;
     const fiberKey = Object.keys(chartEl).find(k => k.startsWith('__reactFiber'));
@@ -260,8 +308,7 @@
     if (appgEnabled) drawAppgBlock(seriesData, uniqueGraphs);
     if (!labelsEnabled) return;
 
-    const LABEL_H = 20, ABOVE_OFF = 22, BELOW_OFF = 22;
-
+    // ── Подписи значений ──────────────────────────────────────────────────
     uniqueGraphs.forEach((graph, si) => {
       const points = seriesData[si]?.data;
       if (!points?.length) return;
@@ -271,32 +318,52 @@
       for (const m of graph.getAttribute('d').matchAll(/[ML]\s*([\d.]+)[,\s]([\d.]+)/g)) {
         pathCoords.push({ x: parseFloat(m[1]), y: parseFloat(m[2]) });
       }
+
       const selectedIdxs = pathCoords.map((_, i) => i)
         .filter(i => i % step === 0 || i === pathCoords.length - 1);
-      const placeBelow = si % 2 === 1;
+
+      // Чётные серии — выше, нечётные — ниже
+      const defaultBelow = si % 2 === 1;
+
+      // Вычисляем позиции с учётом границ
       const labels = selectedIdxs.map(i => {
-        const cx = pathCoords[i].x + plotX, cy = pathCoords[i].y + plotY;
-        return { cx, cy, ly: placeBelow ? cy + BELOW_OFF : cy - ABOVE_OFF,
-          placeBelow, label: fmt(yVals[i] ?? 0), lineColor };
+        const cx = pathCoords[i].x + plotX;
+        const cy = pathCoords[i].y + plotY;
+        const { ly, placeBelow } = calcLabelPos(cy, defaultBelow, plotY, plotBot);
+        return { cx, cy, ly, placeBelow, label: fmt(yVals[i] ?? 0), lineColor };
       });
 
-      if (!placeBelow) {
-        labels.sort((a, b) => a.cy - b.cy);
-        for (let k = 1; k < labels.length; k++) {
-          const prev = labels[k-1], cur = labels[k];
-          if (Math.abs(cur.cx - prev.cx) < 60) { const gap = prev.ly - (cur.ly - LABEL_H); if (gap > 0) cur.ly -= gap + 4; }
+      // O(n) антиколлизия внутри серии
+      const above = labels.filter(l => !l.placeBelow);
+      const below = labels.filter(l => l.placeBelow);
+
+      above.sort((a, b) => a.cy - b.cy);
+      for (let k = 1; k < above.length; k++) {
+        const prev = above[k-1], cur = above[k];
+        if (Math.abs(cur.cx - prev.cx) < 60) {
+          const gap = prev.ly - (cur.ly - LABEL_H);
+          if (gap > 0) cur.ly -= gap + 4;
         }
-      } else {
-        labels.sort((a, b) => b.cy - a.cy);
-        for (let k = 1; k < labels.length; k++) {
-          const prev = labels[k-1], cur = labels[k];
-          if (Math.abs(cur.cx - prev.cx) < 60) { const gap = (cur.ly - LABEL_H) - prev.ly; if (gap < 0) cur.ly -= gap - 4; }
+        // после сдвига снова зажимаем сверху
+        if (cur.ly - LABEL_H < plotY + 4) cur.ly = plotY + 4 + LABEL_H;
+      }
+
+      below.sort((a, b) => b.cy - a.cy);
+      for (let k = 1; k < below.length; k++) {
+        const prev = below[k-1], cur = below[k];
+        if (Math.abs(cur.cx - prev.cx) < 60) {
+          const gap = (cur.ly - LABEL_H) - prev.ly;
+          if (gap < 0) cur.ly -= gap - 4;
         }
+        // после сдвига зажимаем снизу
+        const safeBot = plotBot - X_AXIS_CLEARANCE;
+        if (cur.ly + LABEL_H > safeBot) cur.ly = safeBot - LABEL_H;
       }
 
       labels.forEach(({ cx, cy, label, lineColor, ly, placeBelow }) => {
-        const lineY1 = placeBelow ? cy + 8 : cy - 8;
-        const lineY2 = placeBelow ? ly - 4 : ly + LABEL_H - 2;
+        // Соединительная линия от точки до бейджа
+        const lineY1 = placeBelow ? cy + 8  : cy - 8;
+        const lineY2 = placeBelow ? ly - 2  : ly + LABEL_H;
         if (Math.abs(lineY2 - lineY1) > 2) {
           const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
           line.setAttribute('x1', cx); line.setAttribute('y1', lineY1);
@@ -306,77 +373,78 @@
           line.setAttribute('class', 'custom-val-dot');
           svg.appendChild(line);
         }
-        [[7,'white',lineColor,2],[3.5,lineColor,lineColor,0]].forEach(([r,fill,stroke,sw]) => {
+
+        // Точка (внешний + внутренний круг)
+        [[7,'white',lineColor,2],[3.5,lineColor,'none',0]].forEach(([r,fill,stroke,sw]) => {
           const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
           c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
-          c.setAttribute('fill', fill); if (sw) { c.setAttribute('stroke', stroke); c.setAttribute('stroke-width', sw); }
-          c.setAttribute('class', 'custom-val-dot'); svg.appendChild(c);
+          c.setAttribute('fill', fill);
+          if (sw > 0) { c.setAttribute('stroke', stroke); c.setAttribute('stroke-width', sw); }
+          c.setAttribute('class', 'custom-val-dot');
+          svg.appendChild(c);
         });
+
+        // Размер бейджа
         const tmp = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         tmp.setAttribute('font-size', '11'); tmp.setAttribute('font-family', 'YS Text, Arial, sans-serif');
         tmp.textContent = label; svg.appendChild(tmp);
         const tw = tmp.getComputedTextLength(); svg.removeChild(tmp);
-        const pad = 5, bw = tw + pad * 2, bh = 18, rectY = placeBelow ? ly : ly - bh + 2;
+
+        const pad = 5, bw = tw + pad * 2, bh = LABEL_H;
+        const rectY = placeBelow ? ly : ly - bh;
+
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', cx - bw/2); rect.setAttribute('y', rectY);
+        rect.setAttribute('x', cx - bw / 2); rect.setAttribute('y', rectY);
         rect.setAttribute('width', bw); rect.setAttribute('height', bh);
         rect.setAttribute('rx', 4); rect.setAttribute('fill', lineColor);
         rect.setAttribute('opacity', '0.9'); rect.setAttribute('class', 'custom-val-label');
         svg.appendChild(rect);
+
+        const textY = placeBelow ? rectY + bh - 5 : rectY + bh - 5;
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        text.setAttribute('x', cx); text.setAttribute('y', placeBelow ? ly + bh - 5 : ly - 4);
+        text.setAttribute('x', cx); text.setAttribute('y', textY);
         text.setAttribute('text-anchor', 'middle'); text.setAttribute('font-size', '11');
         text.setAttribute('font-weight', '600'); text.setAttribute('fill', 'white');
         text.setAttribute('font-family', 'YS Text, Arial, sans-serif');
-        text.setAttribute('class', 'custom-val-label'); text.textContent = label;
+        text.setAttribute('class', 'custom-val-label');
+        text.textContent = label;
         svg.appendChild(text);
       });
     });
   }
 
-  // ── UI панель с кнопкой свернуть ─────────────────────────────────────────
+  // ── UI панель ─────────────────────────────────────────────────────────────
 
   function createToggle() {
     if (document.getElementById('metrika-labels-toggle-wrap')) return;
-
     const wrap = document.createElement('div');
     wrap.id = 'metrika-labels-toggle-wrap';
     wrap.style.cssText = `
-      position: fixed; bottom: 20px; right: 20px; z-index: 99999;
-      background: #fff; border: 1px solid #d9d9d9; border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.13);
-      font-family: YS Text, Arial, sans-serif; font-size: 13px; color: #333;
-      overflow: hidden;
+      position:fixed; bottom:20px; right:20px; z-index:99999;
+      background:#fff; border:1px solid #d9d9d9; border-radius:8px;
+      box-shadow:0 2px 10px rgba(0,0,0,.13);
+      font-family:YS Text,Arial,sans-serif; font-size:13px; color:#333; overflow:hidden;
     `;
 
-    // ── Шапка панели ─────────────────────────────────────────────────────
     const header = document.createElement('div');
     header.style.cssText = `
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 7px 10px 7px 14px; cursor: pointer;
-      border-bottom: 1px solid #eee; gap: 10px;
-      user-select: none;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:7px 10px 7px 14px; cursor:pointer;
+      border-bottom:1px solid #eee; gap:10px; user-select:none;
     `;
-
     const headerTitle = document.createElement('span');
     headerTitle.textContent = '📊 Метрика';
     headerTitle.style.cssText = 'font-weight:600;font-size:12px;color:#555;';
-
     const collapseBtn = document.createElement('button');
-    collapseBtn.style.cssText = `
-      background: none; border: none; cursor: pointer;
-      font-size: 16px; color: #aaa; line-height: 1; padding: 0;
-      transition: transform 0.2s;
-    `;
+    collapseBtn.style.cssText = `background:none;border:none;cursor:pointer;
+      font-size:16px;color:#aaa;line-height:1;padding:0;transition:transform .2s;`;
     collapseBtn.textContent = '▲';
     collapseBtn.title = 'Свернуть';
-
     header.appendChild(headerTitle);
     header.appendChild(collapseBtn);
 
-    // ── Тело панели ──────────────────────────────────────────────────────
     const body = document.createElement('div');
-    body.style.cssText = 'padding: 8px 14px 8px 14px; display: flex; flex-direction: column; gap: 6px;';
+    body.style.cssText = 'padding:8px 14px; display:flex; flex-direction:column; gap:6px;';
 
     function makeRow(id, labelText, checked, onChange) {
       const row = document.createElement('div');
@@ -391,17 +459,16 @@
       return row;
     }
 
-    body.appendChild(makeRow('metrika-labels-cb', 'Подписать значения',  labelsEnabled, val => { labelsEnabled = val; drawLabels(); }));
-    body.appendChild(makeRow('metrika-round-cb',  'Округлять значения',  roundEnabled,  val => { roundEnabled  = val; drawLabels(); }));
-    body.appendChild(makeRow('metrika-xaxis-cb',  'Все метки оси X',     xAxisEnabled,  val => { xAxisEnabled  = val; drawLabels(); }));
-    body.appendChild(makeRow('metrika-appg-cb',   'АППГ под графиком',   appgEnabled,   val => { appgEnabled   = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-labels-cb', 'Подписать значения', labelsEnabled, val => { labelsEnabled = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-round-cb',  'Округлять значения', roundEnabled,  val => { roundEnabled  = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-xaxis-cb',  'Все метки оси X',    xAxisEnabled,  val => { xAxisEnabled  = val; drawLabels(); }));
+    body.appendChild(makeRow('metrika-appg-cb',   'АППГ под графиком',  appgEnabled,   val => { appgEnabled   = val; drawLabels(); }));
 
     const authorDiv = document.createElement('div');
     authorDiv.style.cssText = 'border-top:1px solid #eee;margin-top:2px;padding-top:6px;font-size:11px;color:#999;display:flex;align-items:center;gap:4px;';
     authorDiv.innerHTML = 'by <a href="https://t.me/seregaseo" target="_blank" rel="noopener noreferrer" style="color:#5B8AF0;text-decoration:none;font-weight:600;">@sc00d</a>';
     body.appendChild(authorDiv);
 
-    // ── Логика сворачивания ───────────────────────────────────────────────
     function applyCollapsed() {
       if (panelCollapsed) {
         body.style.display = 'none';
@@ -415,12 +482,7 @@
         header.style.borderBottom = '1px solid #eee';
       }
     }
-
-    header.addEventListener('click', () => {
-      panelCollapsed = !panelCollapsed;
-      applyCollapsed();
-    });
-
+    header.addEventListener('click', () => { panelCollapsed = !panelCollapsed; applyCollapsed(); });
     applyCollapsed();
 
     wrap.appendChild(header);
